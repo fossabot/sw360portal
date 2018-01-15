@@ -11,6 +11,7 @@
 package org.eclipse.sw360.licenseinfo;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Enums;
 import com.google.common.cache.Cache;
 import com.google.common.cache.CacheBuilder;
 import com.google.common.collect.Lists;
@@ -28,10 +29,7 @@ import org.eclipse.sw360.datahandler.thrift.components.Release;
 import org.eclipse.sw360.datahandler.thrift.licenseinfo.*;
 import org.eclipse.sw360.datahandler.thrift.projects.Project;
 import org.eclipse.sw360.datahandler.thrift.users.User;
-import org.eclipse.sw360.licenseinfo.outputGenerators.DocxGenerator;
-import org.eclipse.sw360.licenseinfo.outputGenerators.OutputGenerator;
-import org.eclipse.sw360.licenseinfo.outputGenerators.TextGenerator;
-import org.eclipse.sw360.licenseinfo.outputGenerators.XhtmlGenerator;
+import org.eclipse.sw360.licenseinfo.outputGenerators.*;
 import org.eclipse.sw360.licenseinfo.parsers.*;
 import org.eclipse.sw360.licenseinfo.util.LicenseNameWithTextUtils;
 
@@ -44,6 +42,8 @@ import java.util.stream.Collectors;
 import static org.eclipse.sw360.datahandler.common.CommonUtils.nullToEmptySet;
 import static org.eclipse.sw360.datahandler.common.SW360Assert.assertNotNull;
 import static org.eclipse.sw360.datahandler.common.WrappedException.wrapTException;
+import static org.eclipse.sw360.datahandler.thrift.licenseinfo.OutputFormatVariant.REPORT;
+import static org.eclipse.sw360.datahandler.thrift.licenseinfo.OutputFormatVariant.DISCLOSURE;
 
 /**
  * Implementation of the Thrift service
@@ -52,7 +52,7 @@ public class LicenseInfoHandler implements LicenseInfoService.Iface {
     private static final Logger LOGGER = Logger.getLogger(LicenseInfoHandler.class);
     private static final int CACHE_TIMEOUT_MINUTES = 15;
     private static final int CACHE_MAX_ITEMS = 100;
-    private static final String DEFAULT_LICENSE_INFO_HEADER_FILE="/DefaultLicenseInfoHeader.txt";
+    private static final String DEFAULT_LICENSE_INFO_HEADER_FILE = "/DefaultLicenseInfoHeader.txt";
     private static final String DEFAULT_LICENSE_INFO_TEXT = loadDefaultLicenseInfoHeaderText();
 
     protected List<LicenseInfoParser> parsers;
@@ -67,7 +67,7 @@ public class LicenseInfoHandler implements LicenseInfoService.Iface {
 
     @VisibleForTesting
     protected LicenseInfoHandler(AttachmentDatabaseHandler attachmentDatabaseHandler,
-                              ComponentDatabaseHandler componentDatabaseHandler) throws MalformedURLException {
+                                 ComponentDatabaseHandler componentDatabaseHandler) throws MalformedURLException {
         this.componentDatabaseHandler = componentDatabaseHandler;
         this.licenseInfoCache = CacheBuilder.newBuilder().expireAfterWrite(CACHE_TIMEOUT_MINUTES, TimeUnit.MINUTES)
                 .maximumSize(CACHE_MAX_ITEMS).build();
@@ -76,26 +76,27 @@ public class LicenseInfoHandler implements LicenseInfoService.Iface {
 
         // @formatter:off
         parsers = Lists.newArrayList(
-            new SPDXParser(attachmentDatabaseHandler.getAttachmentConnector(), contentProvider),
-            new CLIParser(attachmentDatabaseHandler.getAttachmentConnector(), contentProvider),
-            new CombinedCLIParser(attachmentDatabaseHandler.getAttachmentConnector(), contentProvider, componentDatabaseHandler)
+                new SPDXParser(attachmentDatabaseHandler.getAttachmentConnector(), contentProvider),
+                new CLIParser(attachmentDatabaseHandler.getAttachmentConnector(), contentProvider),
+                new CombinedCLIParser(attachmentDatabaseHandler.getAttachmentConnector(), contentProvider, componentDatabaseHandler)
         );
 
         outputGenerators = Lists.newArrayList(
-            new TextGenerator(),
-            new XhtmlGenerator(),
-            new DocxGenerator()
+                new TextGenerator(DISCLOSURE, "License Disclosure as TEXT"),
+                new XhtmlGenerator(DISCLOSURE, "License Disclosure as XHTML"),
+                new DocxGenerator(DISCLOSURE, "License Disclosure as DOCX"),
+                new DocxGenerator(REPORT, "License Report as DOCX")
         );
         // @formatter:on
     }
 
     @Override
-    public LicenseInfoFile getLicenseInfoFile(Project project, User user, String outputGeneratorClassName,
-            Map<String, Set<String>> releaseIdsToSelectedAttachmentIds, Map<String, Set<LicenseNameWithText>> excludedLicensesPerAttachment)
+    public LicenseInfoFile getLicenseInfoFile(Project project, User user, String outputGenerator,
+                                              Map<String, Set<String>> releaseIdsToSelectedAttachmentIds, Map<String, Set<LicenseNameWithText>> excludedLicensesPerAttachment)
             throws TException {
         assertNotNull(project);
         assertNotNull(user);
-        assertNotNull(outputGeneratorClassName);
+        assertNotNull(outputGenerator);
         assertNotNull(releaseIdsToSelectedAttachmentIds);
         assertNotNull(excludedLicensesPerAttachment);
 
@@ -103,7 +104,14 @@ public class LicenseInfoHandler implements LicenseInfoService.Iface {
         Collection<LicenseInfoParsingResult> projectLicenseInfoResults = getAllReleaseLicenseInfos(releaseToAttachmentId, user,
                 excludedLicensesPerAttachment);
 
-        OutputGenerator<?> generator = getOutputGeneratorByClassname(outputGeneratorClassName);
+        String[] outputGeneratorClassnameAndVariant = outputGenerator.split("::");
+        if (outputGeneratorClassnameAndVariant.length != 2) {
+            throw new TException("Unsupported output generator value: " + outputGenerator);
+        }
+
+        String outputGeneratorClassName = outputGeneratorClassnameAndVariant[0];
+        OutputFormatVariant outputGeneratorVariant = Enums.getIfPresent(OutputFormatVariant.class, outputGeneratorClassnameAndVariant[1]).orNull();
+        OutputGenerator<?> generator = getOutputGeneratorByClassnameAndVariant(outputGeneratorClassName, outputGeneratorVariant);
         LicenseInfoFile licenseInfoFile = new LicenseInfoFile();
 
         licenseInfoFile.setOutputFormatInfo(generator.getOutputFormatInfo());
@@ -114,7 +122,7 @@ public class LicenseInfoHandler implements LicenseInfoService.Iface {
         } else if (output instanceof String) {
             licenseInfoFile.setGeneratedOutput(((String) output).getBytes());
         } else {
-            throw new TException("Unsupported output generator result: " + output.getClass().getName());
+            throw new TException("Unsupported output generator result: " + output.getClass().getSimpleName());
         }
 
         return licenseInfoFile;
@@ -215,7 +223,7 @@ public class LicenseInfoHandler implements LicenseInfoService.Iface {
     }
 
     protected Collection<LicenseInfoParsingResult> getAllReleaseLicenseInfos(Map<Release, Set<String>> releaseToSelectedAttachmentIds,
-            User user, Map<String, Set<LicenseNameWithText>> excludedLicensesPerAttachment) throws TException {
+                                                                             User user, Map<String, Set<LicenseNameWithText>> excludedLicensesPerAttachment) throws TException {
         List<LicenseInfoParsingResult> results = Lists.newArrayList();
 
         for (Entry<Release, Set<String>> entry : releaseToSelectedAttachmentIds.entrySet()) {
@@ -259,12 +267,12 @@ public class LicenseInfoHandler implements LicenseInfoService.Iface {
     }
 
     protected List<LicenseInfoParsingResult> assignReleaseToLicenseInfoParsingResult(LicenseInfoParsingResult licenseInfoParsingResult,
-            Release release) {
+                                                                                     Release release) {
         return assignReleaseToLicenseInfoParsingResults(Collections.singletonList(licenseInfoParsingResult), release);
     }
 
     protected List<LicenseInfoParsingResult> assignReleaseToLicenseInfoParsingResults(List<LicenseInfoParsingResult> parsingResults,
-            Release release) {
+                                                                                      Release release) {
         parsingResults.forEach(r -> {
             //override by given release only if the fields were not set by parser, because parser knows best
             if (!r.isSetVendor() && !r.isSetName() && !r.isSetVersion()) {
@@ -278,13 +286,23 @@ public class LicenseInfoHandler implements LicenseInfoService.Iface {
 
     protected OutputGenerator<?> getOutputGeneratorByClassname(String generatorClassname) throws TException {
         assertNotNull(generatorClassname);
-        return outputGenerators.stream().filter(outputGenerator -> generatorClassname.equals(outputGenerator.getClass().getName()))
+        return outputGenerators.stream()
+                .filter(outputGenerator -> generatorClassname.equals(outputGenerator.getClass().getSimpleName()))
                 .findFirst().orElseThrow(() -> new TException("Unknown output generator: " + generatorClassname));
     }
 
-    private static String loadDefaultLicenseInfoHeaderText(){
-            String defaultLicenseInfoHeader = new String( CommonUtils.loadResource(LicenseInfoHandler.class, DEFAULT_LICENSE_INFO_HEADER_FILE).orElse(new byte[0]) );
-            defaultLicenseInfoHeader = defaultLicenseInfoHeader.replaceAll("(?m)^#.*\\n", "");  // ignore comments in template file
-            return defaultLicenseInfoHeader;
+    protected OutputGenerator<?> getOutputGeneratorByClassnameAndVariant(String generatorClassname, OutputFormatVariant generatorVariant) throws TException {
+        assertNotNull(generatorClassname);
+        assertNotNull(generatorVariant);
+        return outputGenerators.stream()
+                .filter(outputGenerator -> generatorClassname.equals(outputGenerator.getClass().getSimpleName()))
+                .filter(outputGenerator -> generatorVariant.equals(outputGenerator.getOutputVariant()))
+                .findFirst().orElseThrow(() -> new TException("Unknown output generator: " + generatorClassname));
+    }
+
+    private static String loadDefaultLicenseInfoHeaderText() {
+        String defaultLicenseInfoHeader = new String(CommonUtils.loadResource(LicenseInfoHandler.class, DEFAULT_LICENSE_INFO_HEADER_FILE).orElse(new byte[0]));
+        defaultLicenseInfoHeader = defaultLicenseInfoHeader.replaceAll("(?m)^#.*\\n", "");  // ignore comments in template file
+        return defaultLicenseInfoHeader;
     }
 }

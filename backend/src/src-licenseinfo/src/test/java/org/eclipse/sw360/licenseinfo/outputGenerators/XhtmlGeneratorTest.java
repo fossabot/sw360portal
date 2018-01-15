@@ -1,5 +1,6 @@
 /*
  * Copyright Bosch Software Innovations GmbH, 2016.
+ * With modifications by Siemens AG, 2018.
  * Part of the SW360 Portal Project.
  *
  * SPDX-License-Identifier: EPL-1.0
@@ -11,10 +12,7 @@
  */
 package org.eclipse.sw360.licenseinfo.outputGenerators;
 
-import org.eclipse.sw360.datahandler.thrift.licenseinfo.LicenseInfo;
-import org.eclipse.sw360.datahandler.thrift.licenseinfo.LicenseInfoParsingResult;
-import org.eclipse.sw360.datahandler.thrift.licenseinfo.LicenseInfoRequestStatus;
-import org.eclipse.sw360.datahandler.thrift.licenseinfo.LicenseNameWithText;
+import org.eclipse.sw360.datahandler.thrift.licenseinfo.*;
 import org.dom4j.Document;
 import org.dom4j.Element;
 import org.dom4j.Text;
@@ -124,7 +122,7 @@ public class XhtmlGeneratorTest {
         LicenseInfoParsingResult lipresultEmpty = generateLIPResult(liEmpty, releaseName, version1, vendorName);
         lipresultsEmpty = Collections.singletonList(lipresultEmpty);
 
-        xhtmlGenerator = new XhtmlGenerator();
+        xhtmlGenerator = new XhtmlGenerator(OutputFormatVariant.DISCLOSURE, "License Disclosure as XHTML");
 
         xmlString = xhtmlGenerator.generateOutputFile(lipresults, "myproject", "Lorem Ipsum");
         xmlString2 = xhtmlGenerator.generateOutputFile(lipresults2, "myproject", "Lorem Ipsum");

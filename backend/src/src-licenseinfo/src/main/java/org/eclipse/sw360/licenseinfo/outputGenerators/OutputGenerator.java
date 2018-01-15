@@ -13,7 +13,6 @@
 
 package org.eclipse.sw360.licenseinfo.outputGenerators;
 
-
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
 import org.apache.commons.io.IOUtils;
@@ -36,7 +35,6 @@ public abstract class OutputGenerator<T> {
     protected static final String LICENSE_REFERENCE_ID_MAP_CONTEXT_PROPERTY = "licenseNameWithTextToReferenceId";
     protected static final String ACKNOWLEDGEMENTS_CONTEXT_PROPERTY = "acknowledgements";
     protected static final String ALL_LICENSE_NAMES_WITH_TEXTS = "allLicenseNamesWithTexts";
-    protected static final String LICENSES_CONTEXT_PROPERTY = "licenses";
     protected static final String LICENSE_INFO_RESULTS_CONTEXT_PROPERTY = "licenseInfoResults";
     protected static final String LICENSE_INFO_ERROR_RESULTS_CONTEXT_PROPERTY = "licenseInfoErrorResults";
     protected static final String LICENSE_INFO_HEADER_TEXT = "licenseInfoHeader";
@@ -45,12 +43,14 @@ public abstract class OutputGenerator<T> {
     private final String outputDescription;
     private final boolean isOutputBinary;
     private final String outputMimeType;
+    private final OutputFormatVariant outputVariant;
 
-    OutputGenerator(String outputType, String outputDescription, boolean isOutputBinary, String mimeType){
+    OutputGenerator(String outputType, String outputDescription, boolean isOutputBinary, String mimeType, OutputFormatVariant variant) {
         this.outputType = outputType;
         this.outputDescription = outputDescription;
         this.isOutputBinary = isOutputBinary;
         this.outputMimeType = mimeType;
+        this.outputVariant = variant;
     }
 
     public abstract T generateOutputFile(Collection<LicenseInfoParsingResult> projectLicenseInfoResults, String projectName, String licenseInfoHeaderText) throws SW360Exception;
@@ -71,13 +71,18 @@ public abstract class OutputGenerator<T> {
         return outputMimeType;
     }
 
+    public OutputFormatVariant getOutputVariant() {
+        return outputVariant;
+    }
+
     public OutputFormatInfo getOutputFormatInfo() {
         return new OutputFormatInfo()
                 .setFileExtension(getOutputType())
                 .setDescription(getOutputDescription())
                 .setIsOutputBinary(isOutputBinary())
-                .setGeneratorClassName(this.getClass().getName())
-                .setMimeType(getOutputMimeType());
+                .setGeneratorClassName(this.getClass().getSimpleName())
+                .setMimeType(getOutputMimeType())
+                .setVariant(getOutputVariant());
     }
 
     public String getComponentLongName(LicenseInfoParsingResult li) {
@@ -102,9 +107,9 @@ public abstract class OutputGenerator<T> {
     }
 
     @NotNull
-    protected LicenseInfoParsingResult mergeLicenseInfoParsingResults(LicenseInfoParsingResult r1, LicenseInfoParsingResult r2){
+    protected LicenseInfoParsingResult mergeLicenseInfoParsingResults(LicenseInfoParsingResult r1, LicenseInfoParsingResult r2) {
         if (r1.getStatus() != LicenseInfoRequestStatus.SUCCESS || r2.getStatus() != LicenseInfoRequestStatus.SUCCESS ||
-                !getComponentLongName(r1).equals(getComponentLongName(r2))){
+                !getComponentLongName(r1).equals(getComponentLongName(r2))) {
             throw new IllegalArgumentException("Only successful parsing results for the same release can be merged");
         }
         LicenseInfoParsingResult r = new LicenseInfoParsingResult(r1);
@@ -145,10 +150,10 @@ public abstract class OutputGenerator<T> {
                 .collect(Collectors.toList());
     }
 
-    private static <U> SortedMap<String, U> sortStringKeyedMap(Map<String, U> unsorted){
+    private static <U> SortedMap<String, U> sortStringKeyedMap(Map<String, U> unsorted) {
         SortedMap<String, U> sorted = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
         sorted.putAll(unsorted);
-        if (sorted.size() != unsorted.size()){
+        if (sorted.size() != unsorted.size()) {
             // there were key collisions and some data was lost -> throw away the sorted map and sort by case sensitive order
             sorted = new TreeMap<>();
             sorted.putAll(unsorted);
@@ -176,10 +181,8 @@ public abstract class OutputGenerator<T> {
      * The given file will be used as velocity template and will be rendered with
      * the described data.
      *
-     * @param projectLicenseInfoResults
-     *            parsing results to be rendered
-     * @param file
-     *            name of template file
+     * @param projectLicenseInfoResults parsing results to be rendered
+     * @param file                      name of template file
      * @return rendered template
      */
     protected String renderTemplateWithDefaultValues(Collection<LicenseInfoParsingResult> projectLicenseInfoResults, String file, String licenseInfoHeaderText) {
@@ -230,13 +233,11 @@ public abstract class OutputGenerator<T> {
      * map must contain an id for each license name present in the license info
      * objects.
      *
-     * @param licenseInfoResults
-     *            parsing results with license infos and licenses to be sorted
-     * @param licenseToReferenceId
-     *            mapping of license name to id to be able to sort the licenses
+     * @param licenseInfoResults   parsing results with license infos and licenses to be sorted
+     * @param licenseToReferenceId mapping of license name to id to be able to sort the licenses
      */
     private void sortLicenseNamesWithinEachLicenseInfoById(Collection<LicenseInfoParsingResult> licenseInfoResults,
-            Map<LicenseNameWithText, Integer> licenseToReferenceId) {
+                                                           Map<LicenseNameWithText, Integer> licenseToReferenceId) {
         licenseInfoResults.stream().map(LicenseInfoParsingResult::getLicenseInfo).filter(Objects::nonNull)
                 .forEach((LicenseInfo li) -> li.setLicenseNamesWithTexts(
                         sortSet(li.getLicenseNamesWithTexts(), licenseNameWithText -> licenseToReferenceId.get(licenseNameWithText))));
@@ -246,11 +247,8 @@ public abstract class OutputGenerator<T> {
      * Helper function to sort a set by the given key extractor. Falls back to the
      * unsorted set if sorting the set would squash values.
      *
-     * @param unsorted
-     *            set to be sorted
-     * @param keyExtractor
-     *            function to extract the key to use for sorting
-     *
+     * @param unsorted     set to be sorted
+     * @param keyExtractor function to extract the key to use for sorting
      * @return the sorted set
      */
     private static <U, K extends Comparable<K>> SortedSet<U> sortSet(Set<U> unsorted, Function<U, K> keyExtractor) {

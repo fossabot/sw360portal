@@ -14,10 +14,15 @@
 package org.eclipse.sw360.licenseinfo.outputGenerators;
 
 import org.apache.poi.xwpf.usermodel.*;
+import org.apache.thrift.TException;
+import org.eclipse.sw360.datahandler.thrift.ThriftClients;
 import org.eclipse.sw360.datahandler.thrift.licenseinfo.LicenseInfo;
 import org.eclipse.sw360.datahandler.thrift.licenseinfo.LicenseInfoParsingResult;
 import org.eclipse.sw360.datahandler.thrift.licenseinfo.LicenseInfoRequestStatus;
 import org.eclipse.sw360.datahandler.thrift.licenseinfo.LicenseNameWithText;
+import org.eclipse.sw360.datahandler.thrift.licenses.License;
+import org.eclipse.sw360.datahandler.thrift.licenses.LicenseService;
+import org.eclipse.sw360.datahandler.thrift.licenses.Todo;
 
 import java.util.*;
 import java.util.stream.Collectors;
@@ -27,6 +32,7 @@ import static org.eclipse.sw360.datahandler.common.CommonUtils.nullToEmptyString
 public class DocxUtils {
 
     private static final int FONT_SIZE = 12;
+    private static final String TODO_DEFAULT_TEXT = "todo not determined so far.";
     public static final String ALERT_COLOR = "e95850";
 
     private DocxUtils() {
@@ -47,10 +53,7 @@ public class DocxUtils {
     }
 
     public static XWPFTable createTableAndAddReleasesTableHeaders(XWPFDocument document, String[] headers) {
-        if (headers.length < 5) {
-            throw new IllegalArgumentException("Too few table headers found. Need 4 table headers.");
-        }
-        XWPFTable table = document.createTable(1, 5);
+        XWPFTable table = document.createTable(1, headers.length);
         styleTable(table);
         XWPFTableRow headerRow = table.getRow(0);
 
@@ -73,12 +76,131 @@ public class DocxUtils {
         table.setCellMargins(1, 1, 100, 30);
     }
 
-    public static void fillReleasesTable(XWPFTable table, Collection<LicenseInfoParsingResult> projectLicenseInfoResults) {
+    public static void fillReportReleasesTableList(XWPFTable table, Collection<LicenseInfoParsingResult> projectLicenseInfoResults) {
+        for (LicenseInfoParsingResult result : projectLicenseInfoResults) {
+            String releaseName = nullToEmptyString(result.getName());
+            String version = nullToEmptyString(result.getVersion());
+            Set<String> copyrights = Collections.EMPTY_SET;
+            LicenseInfo licenseInfo = result.getLicenseInfo();
+            if (licenseInfo.isSetCopyrights()) {
+                copyrights = licenseInfo.getCopyrights();
+            }
+            addReportTableListRow(table, releaseName, version, copyrights);
+        }
+    }
+
+    public static void fillReportReleasesTableDetails(XWPFTable table, Collection<LicenseInfoParsingResult> projectLicenseInfoResults) {
+        List<License> licenses = getLicenses();
+        for (LicenseInfoParsingResult result : projectLicenseInfoResults) {
+            String releaseName = nullToEmptyString(result.getName());
+            String version = nullToEmptyString(result.getVersion());
+            if (result.isSetLicenseInfo()) {
+                LicenseInfo licenseInfo = result.getLicenseInfo();
+                if (licenseInfo.isSetLicenseNamesWithTexts()) {
+                    for (LicenseNameWithText licenseNameWithText : licenseInfo.getLicenseNamesWithTexts()) {
+                        Set<String> acknowledgements = new HashSet<>();
+
+                        if (licenseNameWithText.isSetAcknowledgements()) {
+                            acknowledgements.add(licenseNameWithText.getAcknowledgements());
+                        }
+                        String licenseSPDX = licenseNameWithText.isSetLicenseSpdxId() ? licenseNameWithText.getLicenseSpdxId() : "";
+                        Set<String> todos = getTodosFromLicenses(licenseSPDX, licenses);
+                        addReportTableListRow(table, releaseName, version, licenseNameWithText.getLicenseName(),
+                                todos, acknowledgements);
+                        releaseName = "";
+                        version = "";
+                    }
+                }
+            }
+        }
+    }
+
+    private static Set<String> getTodosFromLicenses(String licenseSPDX, List<License> licenses) {
+        Set<String> todos = new HashSet<>();
+        if (!licenseSPDX.isEmpty() && !Objects.isNull(licenses)) {
+            for (License license : licenses) {
+                if (licenseSPDX.equalsIgnoreCase(license.getId())) {
+                    for (Todo todo : license.getTodos()) {
+                        todos.add(todo.getText());
+                    }
+                }
+            }
+        }
+        if (todos.isEmpty()) {
+            todos.add(TODO_DEFAULT_TEXT);
+        }
+        return todos;
+    }
+
+    private static void addReportTableListRow(XWPFTable table, String releaseName, String version, Set<String> copyrights) {
+        XWPFTableRow row = table.createRow();
+
+        XWPFParagraph currentParagraph = row.getCell(0).getParagraphs().get(0);
+        styleTableHeaderParagraph(currentParagraph);
+        XWPFRun currentRun = currentParagraph.createRun();
+        addFormattedText(currentRun, releaseName, FONT_SIZE);
+
+        currentParagraph = row.getCell(1).getParagraphs().get(0);
+        styleTableHeaderParagraph(currentParagraph);
+        currentRun = currentParagraph.createRun();
+        addFormattedText(currentRun, version, FONT_SIZE);
+
+        currentParagraph = row.getCell(2).getParagraphs().get(0);
+        styleTableHeaderParagraph(currentParagraph);
+        currentRun = currentParagraph.createRun();
+        for (String copyright : copyrights) {
+            addFormattedText(currentRun, copyright, FONT_SIZE);
+            addNewLines(currentRun, 1);
+        }
+    }
+
+    private static void addReportTableListRow(XWPFTable table,
+                                              String releaseName,
+                                              String version,
+                                              String licenseName,
+                                              Set<String> todos,
+                                              Set<String> acknowledgements) {
+
+        XWPFTableRow row = table.createRow();
+        String releaseIdentifier = "";
+
+        XWPFParagraph currentParagraph = row.getCell(0).getParagraphs().get(0);
+        styleTableHeaderParagraph(currentParagraph);
+        XWPFRun currentRun = currentParagraph.createRun();
+        if (!releaseName.isEmpty() && !version.isEmpty()) {
+            releaseIdentifier = new StringBuilder().
+                    append(releaseName).append("\r\n").append(version).toString();
+        }
+        addFormattedText(currentRun, releaseIdentifier, FONT_SIZE);
+
+        currentParagraph = row.getCell(1).getParagraphs().get(0);
+        styleTableHeaderParagraph(currentParagraph);
+        currentRun = currentParagraph.createRun();
+        addFormattedText(currentRun, licenseName, FONT_SIZE);
+
+        currentParagraph = row.getCell(2).getParagraphs().get(0);
+        styleTableHeaderParagraph(currentParagraph);
+        currentRun = currentParagraph.createRun();
+        for (String todo : todos) {
+            addFormattedText(currentRun, todo, FONT_SIZE);
+            addNewLines(currentRun, 1);
+        }
+
+        currentParagraph = row.getCell(3).getParagraphs().get(0);
+        styleTableHeaderParagraph(currentParagraph);
+        currentRun = currentParagraph.createRun();
+        for (String acknowledgement : acknowledgements) {
+            addFormattedText(currentRun, acknowledgement, FONT_SIZE);
+            addNewLines(currentRun, 1);
+        }
+    }
+
+    public static void fillClosureReleaseTable(XWPFTable table, Collection<LicenseInfoParsingResult> projectLicenseInfoResults) {
 
         for (LicenseInfoParsingResult result : projectLicenseInfoResults) {
             String releaseName = nullToEmptyString(result.getName());
             String version = nullToEmptyString(result.getVersion());
-            if (result.getStatus()== LicenseInfoRequestStatus.SUCCESS) {
+            if (result.getStatus() == LicenseInfoRequestStatus.SUCCESS) {
                 Set<String> copyrights = Collections.emptySet();
                 Set<LicenseNameWithText> licenseNamesWithTexts = Collections.emptySet();
                 Set<String> acknowledgements = Collections.emptySet();
@@ -94,19 +216,18 @@ public class DocxUtils {
                                 .filter(Objects::nonNull).collect(Collectors.toSet());
                     }
                 }
-
-                addReleaseTableRow(table, releaseName, version, licenseNamesWithTexts, acknowledgements, copyrights);
+                addClosureReleaseTableRow(table, releaseName, version, licenseNamesWithTexts, acknowledgements, copyrights);
             } else {
                 String filename = Optional.ofNullable(result.getLicenseInfo())
                         .map(LicenseInfo::getFilenames)
                         .map(l -> l.stream().findFirst().orElse(null))
                         .orElse("");
-                addReleaseTableErrorRow(table, releaseName, version, nullToEmptyString(result.getMessage()), filename);
+                addClosureReleaseTableErrorRow(table, releaseName, version, nullToEmptyString(result.getMessage()), filename);
             }
         }
     }
 
-    private static void addReleaseTableRow(XWPFTable table, String releaseName, String version, Set<LicenseNameWithText> licenseNamesWithTexts, Set<String> acknowledgements, Set<String> copyrights) {
+    private static void addClosureReleaseTableRow(XWPFTable table, String releaseName, String version, Set<LicenseNameWithText> licenseNamesWithTexts, Set<String> acknowledgements, Set<String> copyrights) {
         XWPFTableRow row = table.createRow();
 
         XWPFParagraph currentParagraph = row.getCell(0).getParagraphs().get(0);
@@ -146,7 +267,17 @@ public class DocxUtils {
         }
     }
 
-    private static void addReleaseTableErrorRow(XWPFTable table, String releaseName, String version, String error, String filename) {
+    private static List<License> getLicenses() {
+        LicenseService.Iface licenseClient = new ThriftClients().makeLicenseClient();
+        try {
+            return licenseClient.getLicenses();
+        } catch (TException e) {
+            e.printStackTrace();
+        }
+        return null;
+    }
+
+    private static void addClosureReleaseTableErrorRow(XWPFTable table, String releaseName, String version, String error, String filename) {
         XWPFTableRow row = table.createRow();
 
         XWPFParagraph currentParagraph = row.getCell(0).getParagraphs().get(0);
@@ -176,13 +307,14 @@ public class DocxUtils {
         paragraph.setAlignment(ParagraphAlignment.LEFT);
     }
 
-    public static void addLicenseTextsHeader(XWPFDocument document, String header) {
+    public static void addTextsHeader(XWPFDocument document, String header) {
         XWPFParagraph paragraph = document.createParagraph();
         XWPFRun run = paragraph.createRun();
         addPageBreak(run);
         XWPFParagraph textParagraph = document.createParagraph();
         XWPFRun textRun = textParagraph.createRun();
         textParagraph.setStyle("Heading1");
+        textRun.setFontSize(FONT_SIZE + 4);
         textRun.setText(header);
 
         addNewLines(textRun, 1);
@@ -275,4 +407,3 @@ public class DocxUtils {
         }
     }
 }
-
