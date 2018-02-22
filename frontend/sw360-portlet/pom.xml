@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 
 <!--
-  ~ Copyright Siemens AG, 2013-2017. Part of the SW360 Portal Project.
+  ~ Copyright Siemens AG, 2013-2018. Part of the SW360 Portal Project.
   ~
   ~ SPDX-License-Identifier: EPL-1.0
   ~
@@ -252,7 +252,11 @@
             <artifactId>commons-csv</artifactId>
             <version>1.4</version>
         </dependency>
-
+        <dependency>
+            <groupId>com.neovisionaries</groupId>
+            <artifactId>nv-i18n</artifactId>
+            <version>1.22</version>
+        </dependency>
         <dependency>
             <groupId>junit</groupId>
             <artifactId>junit</artifactId>
