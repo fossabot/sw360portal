@@ -1,4 +1,5 @@
 [![Stories in Ready](https://badge.waffle.io/sw360/sw360portal.png?label=ready&title=Ready)](https://waffle.io/sw360/sw360portal)
+[![FOSSA Status](https://app.fossa.io/api/projects/git%2Bgithub.com%2Fkallesoranko%2Fsw360portal.svg?type=shield)](https://app.fossa.io/projects/git%2Bgithub.com%2Fkallesoranko%2Fsw360portal?ref=badge_shield)
 
 [![Build Status](https://travis-ci.org/sw360/sw360portal.svg?branch=master)](https://travis-ci.org/sw360/sw360portal)
 
@@ -184,3 +185,6 @@ All rights reserved. This program and the accompanying materials
 are made available under the terms of the Eclipse Public License v1.0
 which accompanies this distribution, and is available at
 http://www.eclipse.org/legal/epl-v10.html
+
+
+[![FOSSA Status](https://app.fossa.io/api/projects/git%2Bgithub.com%2Fkallesoranko%2Fsw360portal.svg?type=large)](https://app.fossa.io/projects/git%2Bgithub.com%2Fkallesoranko%2Fsw360portal?ref=badge_large)
